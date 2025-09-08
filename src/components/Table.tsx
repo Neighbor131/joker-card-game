@@ -17,10 +17,13 @@ const KHISHT_PENALTY = -200
 export default function Table(){
   const [state, setState] = React.useState<GameState>(()=>initGame())
   const [seqIndex,setSeqIndex] = React.useState(0)
-  const seq = SEQ[seqIndex]
+  const seq = SEQ[seqIndex] || { phase: 1, handSize: 1 } // Fallback for safety
+  
   React.useEffect(()=>{
     // start first deal
-    startDeal(state, seq, setState)
+    if (seq) {
+      startDeal(state, seq, setState)
+    }
   },[])
 
   function nextDeal(){
@@ -28,9 +31,10 @@ export default function Table(){
     setSeqIndex(next)
     const s = {...state}
     s.dealer = nextPlayer(state.dealer)
-    s.phase = SEQ[next].phase
-    s.handSize = SEQ[next].handSize
-    startDeal(s, SEQ[next], setState)
+    const nextSeq = SEQ[next] || { phase: 1, handSize: 1 }
+    s.phase = nextSeq.phase
+    s.handSize = nextSeq.handSize
+    startDeal(s, nextSeq, setState)
   }
 
   const you = 0 as PlayerId
@@ -72,7 +76,7 @@ export default function Table(){
 
   function playCard(player: PlayerId, card: Card, declaredSuit?: Suit){
     const s = {...state}
-    const hand = s.hands[player]
+    const hand = s.hands[player] || [] // Safety check
     s.hands[player] = hand.filter(c => c.id !== card.id)
     if (!s.trick) {
       s.trick = { leader: player, plays: [] }
@@ -83,14 +87,19 @@ export default function Table(){
     window.setTimeout(()=>advancePlay(s, setState, seq, nextDeal), 300)
   }
 
-  // Derived helpers
-  const yourHand = state.hands[0] ?? []
+  // Derived helpers with safety checks
+  const yourHand = state.hands[0] || []
   const centerPlays: (Card | null)[] = [null,null,null,null]
   if (state.trick){
     for (const p of state.trick.plays){
       centerPlays[p.player] = p.card
     }
   }
+
+  // Safe handSize for BiddingPanel
+  const safeHandSize = typeof state.handSize === 'number' && Number.isFinite(state.handSize) && state.handSize >= 0 
+    ? Math.min(state.handSize, 9) 
+    : 1
 
   return (
     <div className="table">
@@ -117,14 +126,14 @@ export default function Table(){
           <div className="panel">
             <div><strong>Phase</strong> {state.phase} • <strong>Hand</strong> {state.handSize} • <strong>Dealer</strong> {state.dealer===0?'You':`Bot ${state.dealer}`}</div>
             <div style={{marginTop:6}}><strong>Trump:</strong> {state.trump ? suitText(state.trump) : 'No-trump'}</div>
-           {state.awaiting === 'bidding' && state.bids[0] == null && (
-  <div style={{ marginTop: 8 }}>
-    <BiddingPanel
-      handSize={Math.max(0, Math.min(Number.isFinite(state.handSize as any) ? (state.handSize as number) : 0, 9))}
-      onBid={onHumanBid}
-    />
-  </div>
-)}
+            {state.awaiting === 'bidding' && state.bids[0] == null && (
+              <div style={{ marginTop: 8 }}>
+                <BiddingPanel
+                  handSize={safeHandSize}
+                  onBid={onHumanBid}
+                />
+              </div>
+            )}
             {state.awaiting==='trump-pick' && state.trumpDecider===0 && (
               <div style={{marginTop:8}}><TrumpPicker onPick={(s)=>{ const copy={...state}; copy.trump=s; copy.awaiting='bidding'; setState(copy)}} /></div>
             )}
@@ -169,60 +178,84 @@ function initGame(): GameState {
 }
 
 function startDeal(base: GameState, seq: {phase:number, handSize:number}, setState: (s:GameState)=>void){
+  // Validate seq parameters
+  if (!seq || typeof seq.handSize !== 'number' || seq.handSize < 0 || seq.handSize > 9) {
+    console.error('Invalid sequence:', seq)
+    return
+  }
+
   const s: GameState = JSON.parse(JSON.stringify(base))
   s.phase = seq.phase
   s.handSize = seq.handSize
   s.taken = {0:0,1:0,2:0,3:0}
   s.bids = {}
   s.trick = undefined
-  const deck = makeDeck(Math.floor(Math.random()*1e9))
-  // Determine trump policy
-  if (seq.handSize === 9 && (seq.phase===2 || seq.phase===4)) {
-    s.trumpDecider = ((s.dealer+1)%4) as PlayerId
-  } else {
-    // trump is last stock card
-    const last = deck[deck.length-1]
-    s.trump = last.isJoker ? null : last.suit
-    s.trumpDecider = undefined
-  }
-  // deal N cards to each
-  for (let p=0;p<4;p++){
-    s.hands[p as PlayerId] = deck.slice(p*seq.handSize, p*seq.handSize + seq.handSize)
-  }
-  // On 9-card deals with trump pick rule: deal 3, let decider pick trump, then remaining 6
-  if (seq.handSize===9 && s.trumpDecider!=null){
-    // redeal: 3 to each, then pick, then 6 to each
-    const deck2 = makeDeck(Math.floor(Math.random()*1e9))
-    const hands: Record<PlayerId, Card[]> = {0:[],1:[],2:[],3:[]}
-    let idx = 0
-    // first 3
-    for (let k=0;k<3;k++){
-      for (let p=0;p<4;p++){
-        hands[p as PlayerId].push(deck2[idx++])
+  
+  try {
+    const deck = makeDeck(Math.floor(Math.random()*1e9))
+    
+    // Determine trump policy
+    if (seq.handSize === 9 && (seq.phase===2 || seq.phase===4)) {
+      s.trumpDecider = ((s.dealer+1)%4) as PlayerId
+    } else {
+      // trump is last stock card
+      const last = deck[deck.length-1]
+      s.trump = last?.isJoker ? null : last?.suit || null
+      s.trumpDecider = undefined
+    }
+    
+    // deal N cards to each - with safety checks
+    for (let p=0;p<4;p++){
+      const startIdx = p * seq.handSize
+      const endIdx = startIdx + seq.handSize
+      if (startIdx < deck.length && endIdx <= deck.length) {
+        s.hands[p as PlayerId] = deck.slice(startIdx, endIdx)
+      } else {
+        s.hands[p as PlayerId] = []
       }
     }
-    s.hands = hands
-    // pick trump
-    if (s.trumpDecider===0){
-      s.awaiting = 'trump-pick'
+    
+    // On 9-card deals with trump pick rule: deal 3, let decider pick trump, then remaining 6
+    if (seq.handSize===9 && s.trumpDecider!=null){
+      // redeal: 3 to each, then pick, then 6 to each
+      const deck2 = makeDeck(Math.floor(Math.random()*1e9))
+      const hands: Record<PlayerId, Card[]> = {0:[],1:[],2:[],3:[]}
+      let idx = 0
+      // first 3
+      for (let k=0;k<3;k++){
+        for (let p=0;p<4;p++){
+          if (idx < deck2.length) {
+            hands[p as PlayerId].push(deck2[idx++])
+          }
+        }
+      }
+      s.hands = hands
+      // pick trump
+      if (s.trumpDecider===0){
+        s.awaiting = 'trump-pick'
+      } else {
+        s.trump = aiPickTrump(s.trumpDecider, s.hands)
+        s.awaiting = 'bidding'
+      }
+      // deal remaining 6
+      for (let k=0;k<6;k++){
+        for (let p=0;p<4;p++){
+          if (idx < deck2.length) {
+            hands[p as PlayerId].push(deck2[idx++])
+          }
+        }
+      }
     } else {
-      s.trump = aiPickTrump(s.trumpDecider, s.hands)
       s.awaiting = 'bidding'
     }
-    // deal remaining 6
-    for (let k=0;k<6;k++){
-      for (let p=0;p<4;p++){
-        hands[p as PlayerId].push(deck2[idx++])
-      }
+    s.leader = ((s.dealer+1) % 4) as PlayerId
+    setState(s)
+    // If bots start bidding
+    if (s.awaiting==='bidding') {
+      window.setTimeout(()=>advanceBidding(s, setState, seq, ()=>{}), 400)
     }
-  } else {
-    s.awaiting = 'bidding'
-  }
-  s.leader = ((s.dealer+1) % 4) as PlayerId
-  setState(s)
-  // If bots start bidding
-  if (s.awaiting==='bidding') {
-    window.setTimeout(()=>advanceBidding(s, setState, seq, ()=>{}), 400)
+  } catch (error) {
+    console.error('Error in startDeal:', error)
   }
 }
 
@@ -233,7 +266,8 @@ function advanceBidding(state: GameState, setState: (s:GameState)=>void, seq:{ph
     const pid = ((s.dealer+1+p)%4) as PlayerId
     if (s.bids[pid]==null){
       if (pid===0) { setState(s); return } // wait for human
-      const b = aiBid(pid, s.hands[pid], s.trump??null, seq.handSize)
+      const hand = s.hands[pid] || []
+      const b = aiBid(pid, hand, s.trump??null, seq.handSize)
       s.bids[pid] = b
       setState(s)
       window.setTimeout(()=>advanceBidding(s,setState,seq,nextDeal), 300)
@@ -256,7 +290,7 @@ function botPlayTurn(state: GameState, setState: (s:GameState)=>void, seq:{phase
   const trick = s.trick ?? { leader: s.leader, plays: [] as Trick['plays'] }
   const current = trick.plays.length===0? s.leader : nextActor(trick)
   if (current===0) { setState(s); return }
-  const hand = s.hands[current]
+  const hand = s.hands[current] || []
   let leadSuit: Suit | null = null
   if (trick.plays.length>0){
     const lead = trick.plays[0]
@@ -306,7 +340,7 @@ function advancePlay(state: GameState, setState: (s:GameState)=>void, seq:{phase
   // clear trick after a pause
   window.setTimeout(()=>{
     // if hands empty, score
-    const done = s.hands[0].length===0
+    const done = (s.hands[0] || []).length===0
     if (done){
       // score this deal
       const res = scoreDeal(s)
@@ -349,7 +383,7 @@ function nextActor(trick: Trick): PlayerId {
 function needWinHeuristic(p: PlayerId, s: GameState): boolean {
   const bid = s.bids[p] ?? {type:'pass'} as Bid
   if (bid.type==='pass') return false
-  const remaining = s.hands[p].length
+  const remaining = (s.hands[p] || []).length
   const need = Math.max(0, bid.value - s.taken[p])
   return need >= Math.ceil(remaining/2)
 }
