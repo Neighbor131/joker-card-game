@@ -6,14 +6,14 @@ export default function BiddingPanel(
 ){
   const [value, setValue] = React.useState<number>(0)
 
-  // clamp to integer [0..9]
+  // clamp to safe integer range
   let max = Number.isFinite(handSize) ? Math.trunc(handSize) : 0
   if (max < 0) max = 0
   if (max > 9) max = 9
 
-  // no Array.from with dynamic length → no RangeError
+  // render 0..9 always; disable those above max — zero chance of invalid length
   const opts: number[] = []
-  for (let i = 0; i <= max; i++) opts.push(i)
+  for (let i = 0; i <= 9; i++) opts.push(i)
 
   return (
     <div className="panel" style={{ display:'flex', gap:8, alignItems:'center' }}>
@@ -22,7 +22,9 @@ export default function BiddingPanel(
         value={value}
         onChange={e => setValue(Number((e.target as HTMLSelectElement).value))}
       >
-        {opts.map(n => <option key={n} value={n}>{n}</option>)}
+        {opts.map(n => (
+          <option key={n} value={n} disabled={n > max}>{n}</option>
+        ))}
       </select>
       <button onClick={() => value === 0 ? onBid({ type:'pass' }) : onBid({ type:'number', value })}>
         Declare
