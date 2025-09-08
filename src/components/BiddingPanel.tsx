@@ -6,11 +6,12 @@ export default function BiddingPanel(
 ){
   const [value, setValue] = React.useState<number>(0)
 
-  // Clamp to an integer in [0..9], no Array.from at all.
+  // clamp to integer [0..9]
   let max = Number.isFinite(handSize) ? Math.trunc(handSize) : 0
   if (max < 0) max = 0
   if (max > 9) max = 9
 
+  // no Array.from with dynamic length → no RangeError
   const opts: number[] = []
   for (let i = 0; i <= max; i++) opts.push(i)
 
