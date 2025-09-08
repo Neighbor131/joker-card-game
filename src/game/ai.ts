@@ -28,11 +28,39 @@ export function aiPickTrump(afterDealer: PlayerId, hands: Record<PlayerId, Card[
   return best[0]
 }
 
-export function aiBid(player: PlayerId, hand: Card[], trump: Suit | null, maxBid: number): Bid {
+export function aiBid(
+  player: PlayerId, 
+  hand: Card[], 
+  trump: Suit | null, 
+  maxBid: number,
+  currentBids: Partial<Record<PlayerId, Bid>>,
+  isDealer: boolean
+): Bid {
   const est = evaluateHand(hand, trump)
   let v = Math.max(0, Math.min(maxBid, Math.round(est)))
-  if (v===0) return { type:'pass'}
-  return { type:'number', value: v }
+  
+  // If dealer, must respect the constraint that total != maxBid
+  if (isDealer) {
+    const totalBids = Object.values(currentBids).reduce((sum, bid) => {
+      if (!bid) return sum
+      return sum + (bid.type === 'pass' ? 0 : bid.value)
+    }, 0)
+    
+    if (totalBids + v === maxBid) {
+      // Cannot bid this amount, try alternatives
+      if (v > 0 && totalBids + (v-1) !== maxBid) {
+        v = v - 1 // Bid one less
+      } else if (totalBids + (v+1) <= maxBid && totalBids + (v+1) !== maxBid) {
+        v = v + 1 // Bid one more if possible
+      } else {
+        // Must pass to avoid the forbidden total
+        v = 0
+      }
+    }
+  }
+  
+  if (v === 0) return { type: 'pass' }
+  return { type: 'number', value: v }
 }
 
 export function aiPlay(player: PlayerId, hand: Card[], leadSuit: Suit|null, trump: Suit|null, mustFollow: boolean, needToWin: boolean): Card {
