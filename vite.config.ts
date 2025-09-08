@@ -1,2 +1,4 @@
 import { defineConfig } from 'vite'
-export default defineConfig({ base: '/joker-card-game/' })
+export default defineConfig({
+  base: '/joker-card-game/',
+})
