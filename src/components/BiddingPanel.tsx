@@ -6,7 +6,6 @@ export default function BiddingPanel(
 ){
   const [value, setValue] = React.useState<number>(0)
 
-  // non-negative integer only
   const max = Math.max(0, Number.isFinite(handSize) ? Math.trunc(handSize) : 0)
   const options = Array.from({ length: max + 1 }, (_, i) => i)
 
