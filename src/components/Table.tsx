@@ -117,9 +117,14 @@ export default function Table(){
           <div className="panel">
             <div><strong>Phase</strong> {state.phase} • <strong>Hand</strong> {state.handSize} • <strong>Dealer</strong> {state.dealer===0?'You':`Bot ${state.dealer}`}</div>
             <div style={{marginTop:6}}><strong>Trump:</strong> {state.trump ? suitText(state.trump) : 'No-trump'}</div>
-            {state.awaiting==='bidding' && state.bids[0]==null && (
-              <div style={{marginTop:8}}><BiddingPanel handSize={state.handSize} onBid={onHumanBid} /></div>
-            )}
+           {state.awaiting === 'bidding' && state.bids[0] == null && (
+  <div style={{ marginTop: 8 }}>
+    <BiddingPanel
+      handSize={Math.max(0, Math.min(Number.isFinite(state.handSize as any) ? (state.handSize as number) : 0, 9))}
+      onBid={onHumanBid}
+    />
+  </div>
+)}
             {state.awaiting==='trump-pick' && state.trumpDecider===0 && (
               <div style={{marginTop:8}}><TrumpPicker onPick={(s)=>{ const copy={...state}; copy.trump=s; copy.awaiting='bidding'; setState(copy)}} /></div>
             )}
