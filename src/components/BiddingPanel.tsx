@@ -11,7 +11,7 @@ export default function BiddingPanel(
   if (max < 0) max = 0
   if (max > 9) max = 9
 
-  // build options without Array.from to avoid length errors
+  // build options with a for-loop (no Array.from)
   const opts: number[] = []
   for (let i = 0; i <= max; i++) opts.push(i)
 
