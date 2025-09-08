@@ -11,8 +11,8 @@ export default function CardView({
     ? `${BASE}cards/2B.svg`
     : `${BASE}cards/${cardAssetFile(card)}`
   return (
-    <div className={'card ' + (disabled?'disabled':'')} onClick={disabled?undefined:onClick}>
-      <img src={src} alt={hidden?'Back':`${card.rank}${card.suit}`} />
+    <div className={'card ' + (disabled ? 'disabled' : '')} onClick={disabled ? undefined : onClick}>
+      <img src={src} alt={hidden ? 'Back' : `${card.rank}${card.suit}`} />
       {card.isJoker && !hidden && <div className="jokerRibbon">JOKER</div>}
     </div>
   )
