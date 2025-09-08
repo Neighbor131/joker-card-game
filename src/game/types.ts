@@ -12,7 +12,12 @@ export type PlayerId = 0|1|2|3 // 0=You
 
 export interface Trick {
   leader: PlayerId
-  plays: { player: PlayerId, card: Card, declaredSuit?: Suit }[]
+  plays: { 
+    player: PlayerId, 
+    card: Card, 
+    declaredSuit?: Suit,
+    jokerHigh?: boolean // true = high, false = low, undefined = not a joker
+  }[]
   winner?: PlayerId
   declaredLeadSuit?: Suit // used when leader plays Joker and calls a suit
 }
@@ -22,7 +27,6 @@ export interface DealContext {
   handSize: number
   phase: number // 1..4
   trump: Suit | null // null means no-trump
-  jokerLowest: boolean
   trumpDecider?: PlayerId // only for 9-card deals: player after dealer
 }
 
@@ -43,7 +47,6 @@ export interface GameState {
   phase: number
   handSize: number
   trump: Suit | null
-  jokerLowest: boolean
   trumpDecider?: PlayerId
   hands: Record<PlayerId, Card[]>
   trick?: Trick
@@ -52,6 +55,10 @@ export interface GameState {
   taken: Record<PlayerId, number>
   scores: number[]
   history: DealResult[]
-  awaiting: 'bidding'|'trump-pick'|'play'|'scoring'
+  awaiting: 'bidding'|'trump-pick'|'play'|'scoring'|'joker-choice'
   leader: PlayerId
+  pendingJokerPlay?: {
+    player: PlayerId
+    card: Card
+  }
 }
