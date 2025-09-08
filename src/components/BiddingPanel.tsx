@@ -6,14 +6,14 @@ export default function BiddingPanel(
 ){
   const [value, setValue] = React.useState<number>(0)
 
-  // clamp to safe integer range
-  let max = Number.isFinite(handSize) ? Math.trunc(handSize) : 0
-  if (max < 0) max = 0
-  if (max > 9) max = 9
+  // Fix: Ensure handSize is a valid number and within safe bounds
+  let max = 0
+  if (typeof handSize === 'number' && Number.isFinite(handSize) && handSize >= 0) {
+    max = Math.min(Math.floor(handSize), 9) // Clamp to max 9
+  }
 
-  // render 0..9 always; disable those above max — zero chance of invalid length
-  const opts: number[] = []
-  for (let i = 0; i <= 9; i++) opts.push(i)
+  // Always render 0..9, disable those above max
+  const opts: number[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
   return (
     <div className="panel" style={{ display:'flex', gap:8, alignItems:'center' }}>
