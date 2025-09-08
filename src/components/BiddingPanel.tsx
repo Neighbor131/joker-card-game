@@ -6,12 +6,11 @@ export default function BiddingPanel(
 ){
   const [value, setValue] = React.useState<number>(0)
 
-  // clamp to [0..9] and to an integer
+  // Clamp to an integer in [0..9], no Array.from at all.
   let max = Number.isFinite(handSize) ? Math.trunc(handSize) : 0
   if (max < 0) max = 0
   if (max > 9) max = 9
 
-  // build options with a for-loop (no Array.from)
   const opts: number[] = []
   for (let i = 0; i <= max; i++) opts.push(i)
 
