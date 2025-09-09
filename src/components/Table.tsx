@@ -12,15 +12,13 @@ import Scoreboard from './Scoreboard'
 import { fullSequence } from '../game/sequences'
 
 const SEQ = fullSequence()
-const KHISHT_PENALTY = -200
 
 export default function Table(){
   const [state, setState] = React.useState<GameState>(()=>initGame())
   const [seqIndex,setSeqIndex] = React.useState(0)
-  const seq = SEQ[seqIndex] || { phase: 1, handSize: 1 } // Fallback for safety
+  const seq = SEQ[seqIndex] || { phase: 1, handSize: 1 }
   
   React.useEffect(()=>{
-    // start first deal
     if (seq) {
       startDeal(state, seq, setState)
     }
@@ -37,8 +35,6 @@ export default function Table(){
     startDeal(s, nextSeq, setState)
   }
 
-  const you = 0 as PlayerId
-
   // Handle human actions
   function onHumanBid(b: Bid){
     if (state.awaiting !== 'bidding') return
@@ -47,11 +43,22 @@ export default function Table(){
     setState(s)
     window.setTimeout(()=>advanceBidding(s, setState, seq, nextDeal), 400)
   }
+
   function onHumanPlay(card: Card){
     if (state.awaiting !== 'play') return
     const isYourTurn = state.trick?.plays.length===0 ? state.leader===0 : nextPlayer(state.trick!.plays[state.trick!.plays.length-1].player)===0
     if (!isYourTurn) return
-    // Check legality
+    
+    // If playing a Joker, need to choose high/low
+    if (card.isJoker) {
+      const s = {...state}
+      s.pendingJokerPlay = { player: 0, card }
+      s.awaiting = 'joker-choice'
+      setState(s)
+      return
+    }
+    
+    // Check legality for non-Jokers
     const trick = state.trick!
     const hand = state.hands[0]
     const hasLead = (()=>{
@@ -66,28 +73,51 @@ export default function Table(){
     }
     playCard(0, card)
   }
+
+  function onJokerChoice(high: boolean, leadSuit?: Suit) {
+    if (!state.pendingJokerPlay) return
+    const { player, card } = state.pendingJokerPlay
+    const s = {...state}
+    s.pendingJokerPlay = undefined
+    s.awaiting = 'play'
+    
+    // Play the Joker with the choice
+    playCard(player, card, undefined, high, leadSuit)
+  }
+
   function onPickLeadSuit(suit: Suit){
-    // Only when leader played Joker
     const s = {...state}
     if (!s.trick) return
     s.trick.declaredLeadSuit = suit
     setState(s)
   }
 
-  function playCard(player: PlayerId, card: Card, declaredSuit?: Suit){
+  function playCard(player: PlayerId, card: Card, declaredSuit?: Suit, jokerHigh?: boolean, jokerLeadSuit?: Suit){
     const s = {...state}
-    const hand = s.hands[player] || [] // Safety check
+    const hand = s.hands[player] || []
     s.hands[player] = hand.filter(c => c.id !== card.id)
+    
     if (!s.trick) {
       s.trick = { leader: player, plays: [] }
     }
-    s.trick.plays.push({ player, card, declaredSuit })
+    
+    const play: Trick['plays'][0] = { player, card, declaredSuit }
+    if (card.isJoker) {
+      play.jokerHigh = jokerHigh
+    }
+    
+    s.trick.plays.push(play)
+    
+    // If Joker led and suit specified
+    if (s.trick.plays.length === 1 && card.isJoker && jokerLeadSuit) {
+      s.trick.declaredLeadSuit = jokerLeadSuit
+    }
+    
     setState(s)
-    // If leader played Joker with no declared suit yet and player==leader, and card is Joker, prompt suit via quick UI
     window.setTimeout(()=>advancePlay(s, setState, seq, nextDeal), 300)
   }
 
-  // Derived helpers with safety checks
+  // Derived helpers
   const yourHand = state.hands[0] || []
   const centerPlays: (Card | null)[] = [null,null,null,null]
   if (state.trick){
@@ -96,15 +126,17 @@ export default function Table(){
     }
   }
 
-  // Safe handSize for BiddingPanel
   const safeHandSize = typeof state.handSize === 'number' && Number.isFinite(state.handSize) && state.handSize >= 0 
     ? Math.min(state.handSize, 9) 
     : 1
 
+  // Check if human is dealer (for bidding constraint)
+  const totalBidsBeforeHuman = Object.keys(state.bids).length
+  const isHumanDealer = ((state.dealer + 1 + 3) % 4) === 0 // Human bids last when dealer
+
   return (
     <div className="table">
       <div className="p2 hand">
-        {/* Top bot hand */}
         {(state.hands[1]||[]).map((c,i)=>(<CardView key={c.id} card={c} hidden />))}
       </div>
       <div className="p3 hand" style={{justifySelf:'start'}}>
@@ -126,24 +158,42 @@ export default function Table(){
           <div className="panel">
             <div><strong>Phase</strong> {state.phase} • <strong>Hand</strong> {state.handSize} • <strong>Dealer</strong> {state.dealer===0?'You':`Bot ${state.dealer}`}</div>
             <div style={{marginTop:6}}><strong>Trump:</strong> {state.trump ? suitText(state.trump) : 'No-trump'}</div>
+            
             {state.awaiting === 'bidding' && state.bids[0] == null && (
               <div style={{ marginTop: 8 }}>
                 <BiddingPanel
                   handSize={safeHandSize}
                   onBid={onHumanBid}
+                  currentBids={state.bids}
+                  isDealer={isHumanDealer}
                 />
               </div>
             )}
-            {state.awaiting==='trump-pick' && state.trumpDecider===0 && (
-              <div style={{marginTop:8}}><TrumpPicker onPick={(s)=>{ const copy={...state}; copy.trump=s; copy.awaiting='bidding'; setState(copy)}} /></div>
-            )}
-            {state.trick && state.trick.plays.length===1 && state.trick.plays[0].player===0 && state.trick.plays[0].card.isJoker && !state.trick.declaredLeadSuit && (
+
+            {state.awaiting === 'joker-choice' && state.pendingJokerPlay && (
               <div style={{marginTop:8}}>
-                <div className="panel" style={{display:'flex', gap:6, alignItems:'center'}}>
-                  <span><strong>Lead suit</strong> for Joker:</span>
-                  {(['C','D','H','S'] as Suit[]).map(s=>(<button key={s} onClick={()=>onPickLeadSuit(s)}>{suitText(s)}</button>))}
+                <div className="panel">
+                  <div><strong>Play Joker as:</strong></div>
+                  <div style={{display:'flex', gap:6, marginTop:6}}>
+                    <button onClick={()=>onJokerChoice(true)}>High</button>
+                    <button onClick={()=>onJokerChoice(false)}>Low</button>
+                  </div>
+                  {(!state.trick || state.trick.plays.length === 0) && (
+                    <div style={{marginTop:8}}>
+                      <div><strong>Specify suit:</strong></div>
+                      <div style={{display:'flex', gap:4, marginTop:4}}>
+                        {(['C','D','H','S'] as Suit[]).map(s=>(
+                          <button key={s} onClick={()=>onJokerChoice(true, s)}>{suitText(s)} High</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
+            
+            {state.awaiting==='trump-pick' && state.trumpDecider===0 && (
+              <div style={{marginTop:8}}><TrumpPicker onPick={(s)=>{ const copy={...state}; copy.trump=s; copy.awaiting='bidding'; setState(copy)}} /></div>
             )}
           </div>
         </div>
@@ -161,11 +211,10 @@ function initGame(): GameState {
   return {
     rngSeed: Math.floor(Math.random()*1e9),
     players: ['You','Bot 1','Bot 2','Bot 3'],
-    dealer: 3, // so first deal dealer rotates to 0
+    dealer: 3,
     phase: 1,
     handSize: 1,
     trump: null,
-    jokerLowest: false,
     hands: {0:[],1:[],2:[],3:[]},
     table: [null,null,null,null],
     bids: {},
@@ -178,7 +227,6 @@ function initGame(): GameState {
 }
 
 function startDeal(base: GameState, seq: {phase:number, handSize:number}, setState: (s:GameState)=>void){
-  // Validate seq parameters
   if (!seq || typeof seq.handSize !== 'number' || seq.handSize < 0 || seq.handSize > 9) {
     console.error('Invalid sequence:', seq)
     return
@@ -194,17 +242,19 @@ function startDeal(base: GameState, seq: {phase:number, handSize:number}, setSta
   try {
     const deck = makeDeck(Math.floor(Math.random()*1e9))
     
-    // Determine trump policy
-    if (seq.handSize === 9 && (seq.phase===2 || seq.phase===4)) {
-      s.trumpDecider = ((s.dealer+1)%4) as PlayerId
+    // FIXED: Proper trump determination for Georgian Joker
+    if (seq.handSize === 9 && (seq.phase === 2 || seq.phase === 4)) {
+      // 9-card deals: dealer's last card determines trump
+      const dealerIdx = s.dealer
+      const dealerLastCard = deck[dealerIdx * seq.handSize + seq.handSize - 1]
+      s.trump = dealerLastCard?.isJoker ? null : dealerLastCard?.suit || null
     } else {
-      // trump is last stock card
-      const last = deck[deck.length-1]
-      s.trump = last?.isJoker ? null : last?.suit || null
-      s.trumpDecider = undefined
+      // Regular deals: next card after dealing determines trump
+      const trumpCard = deck[4 * seq.handSize]
+      s.trump = trumpCard?.isJoker ? null : trumpCard?.suit || null
     }
     
-    // deal N cards to each - with safety checks
+    // Deal cards
     for (let p=0;p<4;p++){
       const startIdx = p * seq.handSize
       const endIdx = startIdx + seq.handSize
@@ -215,45 +265,12 @@ function startDeal(base: GameState, seq: {phase:number, handSize:number}, setSta
       }
     }
     
-    // On 9-card deals with trump pick rule: deal 3, let decider pick trump, then remaining 6
-    if (seq.handSize===9 && s.trumpDecider!=null){
-      // redeal: 3 to each, then pick, then 6 to each
-      const deck2 = makeDeck(Math.floor(Math.random()*1e9))
-      const hands: Record<PlayerId, Card[]> = {0:[],1:[],2:[],3:[]}
-      let idx = 0
-      // first 3
-      for (let k=0;k<3;k++){
-        for (let p=0;p<4;p++){
-          if (idx < deck2.length) {
-            hands[p as PlayerId].push(deck2[idx++])
-          }
-        }
-      }
-      s.hands = hands
-      // pick trump
-      if (s.trumpDecider===0){
-        s.awaiting = 'trump-pick'
-      } else {
-        s.trump = aiPickTrump(s.trumpDecider, s.hands)
-        s.awaiting = 'bidding'
-      }
-      // deal remaining 6
-      for (let k=0;k<6;k++){
-        for (let p=0;p<4;p++){
-          if (idx < deck2.length) {
-            hands[p as PlayerId].push(deck2[idx++])
-          }
-        }
-      }
-    } else {
-      s.awaiting = 'bidding'
-    }
+    s.awaiting = 'bidding'
     s.leader = ((s.dealer+1) % 4) as PlayerId
     setState(s)
-    // If bots start bidding
-    if (s.awaiting==='bidding') {
-      window.setTimeout(()=>advanceBidding(s, setState, seq, ()=>{}), 400)
-    }
+    
+    // Start bot bidding if needed
+    window.setTimeout(()=>advanceBidding(s, setState, seq, ()=>{}), 400)
   } catch (error) {
     console.error('Error in startDeal:', error)
   }
@@ -261,25 +278,29 @@ function startDeal(base: GameState, seq: {phase:number, handSize:number}, setSta
 
 function advanceBidding(state: GameState, setState: (s:GameState)=>void, seq:{phase:number, handSize:number}, nextDeal:()=>void){
   const s = JSON.parse(JSON.stringify(state)) as GameState
+  
   // Who hasn't bid yet?
   for (let p=0;p<4;p++){
     const pid = ((s.dealer+1+p)%4) as PlayerId
     if (s.bids[pid]==null){
       if (pid===0) { setState(s); return } // wait for human
+      
       const hand = s.hands[pid] || []
-      const b = aiBid(pid, hand, s.trump??null, seq.handSize)
+      const isDealer = p === 3 // Last to bid
+      const b = aiBid(pid, hand, s.trump??null, seq.handSize, s.bids, isDealer)
       s.bids[pid] = b
       setState(s)
       window.setTimeout(()=>advanceBidding(s,setState,seq,nextDeal), 300)
       return
     }
   }
-  // all bids in
+  
+  // All bids in - start play
   s.awaiting = 'play'
   s.trick = undefined
   s.leader = ((s.dealer+1)%4) as PlayerId
   setState(s)
-  // If leader is bot, let them start
+  
   if (s.leader!==0){
     window.setTimeout(()=>botPlayTurn(s,setState,seq,nextDeal), 500)
   }
@@ -290,24 +311,38 @@ function botPlayTurn(state: GameState, setState: (s:GameState)=>void, seq:{phase
   const trick = s.trick ?? { leader: s.leader, plays: [] as Trick['plays'] }
   const current = trick.plays.length===0? s.leader : nextActor(trick)
   if (current===0) { setState(s); return }
+  
   const hand = s.hands[current] || []
   let leadSuit: Suit | null = null
   if (trick.plays.length>0){
     const lead = trick.plays[0]
     leadSuit = lead.card.isJoker ? (s.trick?.declaredLeadSuit ?? null) : lead.card.suit
   }
+  
   const mustFollow = !!leadSuit && hand.some(c => !c.isJoker && c.suit===leadSuit)
   const needToWin = needWinHeuristic(current, s)
   const choice = aiPlay(current, hand, leadSuit, s.trump, mustFollow, needToWin)
-  // If bot leads with Joker, choose a lead suit
-  let declaredSuit: Suit | undefined = undefined
-  if (trick.plays.length===0 && choice.isJoker){
-    declaredSuit = pickLeadSuitForJoker(hand, s.trump)
-    s.trick = { leader: current, plays: [{player: current, card: choice, declaredSuit}], declaredLeadSuit: declaredSuit }
+  
+  // If bot plays Joker, make high/low decision and suit choice if leading
+  if (choice.isJoker) {
+    const jokerHigh = needToWin || Math.random() > 0.3 // Usually play high
+    let leadSuit: Suit | undefined = undefined
+    
+    if (trick.plays.length === 0) {
+      // Leading with Joker - choose suit
+      leadSuit = pickLeadSuitForJoker(hand, s.trump)
+      s.trick = { leader: current, plays: [] }
+      s.trick.plays.push({ player: current, card: choice, jokerHigh })
+      s.trick.declaredLeadSuit = leadSuit
+    } else {
+      s.trick = trick
+      s.trick.plays.push({ player: current, card: choice, jokerHigh })
+    }
   } else {
     s.trick = trick
     s.trick.plays.push({ player: current, card: choice })
   }
+  
   s.hands[current] = hand.filter(c => c.id !== choice.id)
   setState(s)
   window.setTimeout(()=>advancePlay(s,setState,seq,nextDeal), 300)
@@ -317,11 +352,8 @@ function advancePlay(state: GameState, setState: (s:GameState)=>void, seq:{phase
   const s = JSON.parse(JSON.stringify(state)) as GameState
   const trick = s.trick!
   if (!trick || trick.plays.length<1) { setState(s); return }
-  // If leader played Joker and hasn't declared lead suit yet and leader is human, wait for input
-  if (trick.plays.length===1 && trick.plays[0].player===0 && trick.plays[0].card.isJoker && !s.trick?.declaredLeadSuit){
-    setState(s); return
-  }
-  // If trick incomplete, prompt next actor
+  
+  // If trick incomplete, continue
   if (trick.plays.length < 4){
     const current = nextActor(trick)
     if (current===0){
@@ -331,18 +363,18 @@ function advancePlay(state: GameState, setState: (s:GameState)=>void, seq:{phase
       return
     }
   }
-  // resolve
-  const winner = resolveWinner(trick, s.trump, s.jokerLowest)
+  
+  // Resolve trick
+  const winner = resolveWinner(trick, s.trump)
   s.trick.winner = winner
   s.taken[winner] += 1
   s.leader = winner
   setState(s)
-  // clear trick after a pause
+  
+  // Clear trick and continue or score
   window.setTimeout(()=>{
-    // if hands empty, score
     const done = (s.hands[0] || []).length===0
     if (done){
-      // score this deal
       const res = scoreDeal(s)
       s.history.push(res)
       s.scores = s.scores.map((v,i)=>v + res.scores[i as 0|1|2|3])
@@ -352,7 +384,6 @@ function advancePlay(state: GameState, setState: (s:GameState)=>void, seq:{phase
     } else {
       s.trick = undefined
       setState(s)
-      // If next leader is bot, let them play
       if (s.leader!==0) window.setTimeout(()=>botPlayTurn(s,setState,seq,nextDeal), 500)
     }
   }, 600)
@@ -361,10 +392,14 @@ function advancePlay(state: GameState, setState: (s:GameState)=>void, seq:{phase
 function scoreDeal(s: GameState): DealResult {
   const scores: Record<PlayerId, number> = {0:0,1:0,2:0,3:0}
   const khishtApplied: Record<PlayerId, boolean> = {0:false,1:false,2:false,3:false}
+  
+  // Apply proper khisht penalties based on phase
+  const khishtPenalty = (s.phase === 2 || s.phase === 4) ? -500 : -200
+  
   ;[0,1,2,3].forEach(pid=>{
     const bid = s.bids[pid as PlayerId] ?? {type:'pass'} as Bid
     const taken = s.taken[pid as PlayerId]
-    const res = scoreFor(pid as PlayerId, bid, taken, -200)
+    const res = scoreFor(pid as PlayerId, bid, taken, khishtPenalty)
     scores[pid as PlayerId] = res.score
     khishtApplied[pid as PlayerId] = res.khisht
   })
@@ -389,7 +424,6 @@ function needWinHeuristic(p: PlayerId, s: GameState): boolean {
 }
 
 function pickLeadSuitForJoker(hand: Card[], trump: Suit|null): Suit {
-  // choose strongest suit or trump if set
   const suits: Suit[] = ['C','D','H','S']
   if (trump) return trump
   const counts: Record<Suit, number> = {C:0,D:0,H:0,S:0}
